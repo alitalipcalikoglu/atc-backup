@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { copyFile, mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
 import { BackupError } from './errors.js';
@@ -166,10 +166,13 @@ export class BackupService {
           dest = join(this.config.restoreDir, /** @type {string} */ (o.target));
           if (existsSync(dest) && !o.overwrite) throw new BackupError('TARGET_EXISTS', `"${o.target}" already exists in RESTORE_DIR; pass overwrite to replace it`);
         }
-        await mkdir(dirname(dest), { recursive: true });
+        // A live restore writes into the owning service's own directory, which keeps its mode.
+        if (source) await mkdir(dirname(dest), { recursive: true });
+        else await BackupService.#privateDir(this.config.restoreDir);
         const tmp = `${dest}.restore-${randomBytes(6).toString('hex')}`;
         try {
           await copyFile(from, tmp);
+          await chmod(tmp, 0o600);
           await BackupService.#fsync(tmp);
           const sha = await BackupService.sha256(tmp);
           if (sha !== row.sha256) throw new BackupError('CHECKSUM_MISMATCH', 'the written copy does not match the backup checksum');
@@ -260,7 +263,10 @@ export class BackupService {
     const tmp = join(dir, `.${file}.partial`);
     try {
       if (!existsSync(source.path)) throw new BackupError('SOURCE_MISSING', `the database file of "${source.id}" does not exist`);
-      await mkdir(dir, { recursive: true });
+      await BackupService.#privateDir(this.config.backupDir);
+      await BackupService.#privateDir(dir);
+      // Copies hold other services' secrets: owner-only from the first byte (SQLite gives its journal the same mode).
+      await writeFile(tmp, '', { mode: 0o600, flag: 'wx' });
       const src = new DatabaseSync(source.path, { readOnly: true });
       let pages;
       try {
@@ -271,6 +277,7 @@ export class BackupService {
       // A self-contained file: rollback journal instead of WAL, so the copy is one file with no sidecars.
       const copy = new DatabaseSync(tmp);
       try { copy.exec('PRAGMA journal_mode = DELETE'); } finally { copy.close(); }
+      await chmod(tmp, 0o600);
       const integrity = BackupService.integrity(tmp, false);
       if (integrity !== 'ok') throw new BackupError('INTEGRITY_FAILED', `integrity check failed: ${integrity}`);
       await BackupService.#fsync(tmp);
@@ -337,6 +344,12 @@ export class BackupService {
     const p = this.chain.then(fn, fn);
     this.chain = p.catch(() => undefined);
     return p;
+  }
+
+  /** Create (or tighten) a directory to owner-only access. @param {string} path */
+  static async #privateDir(path) {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    await chmod(path, 0o700);
   }
 
   /** @param {string} path */

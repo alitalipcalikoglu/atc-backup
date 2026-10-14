@@ -155,3 +155,21 @@ test('media: each successful backup is uploaded; failures are recorded; pruning 
   await service.delete(b.id);
   assert.throws(() => service.get(b.id), code('BACKUP_NOT_FOUND'));
 });
+
+test('permissions: backup and restore dirs are 0700, backup and restored files 0600', { skip: process.platform === 'win32' }, async (t) => {
+  const w = workspace();
+  t.after(w.cleanup);
+  const { statSync, mkdirSync, chmodSync } = await import('node:fs');
+  mkdirSync(join(w.dir, 'backups'), { mode: 0o755 });
+  chmodSync(join(w.dir, 'backups'), 0o755);
+  const { service } = testService(w.dir);
+  const mode = (/** @type {string} */ p) => statSync(p).mode & 0o777;
+  const row = await service.run('app', { trigger: 'manual', by: 'x' });
+  assert.equal(row.status, 'ok', row.error ?? '');
+  assert.equal(mode(join(w.dir, 'backups')), 0o700, 'an existing BACKUP_DIR is tightened');
+  assert.equal(mode(join(w.dir, 'backups', 'app')), 0o700);
+  assert.equal(mode(service.pathOf(row)), 0o600);
+  await service.restore(row.id, { target: 'copy.db', by: 'x' });
+  assert.equal(mode(join(w.dir, 'restores')), 0o700);
+  assert.equal(mode(join(w.dir, 'restores', 'copy.db')), 0o600);
+});
