@@ -8,6 +8,7 @@ import { BackupError } from '../domain/errors.js';
 import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
 import { Views } from './views.js';
+import { AuditMetrics } from '../audit-metrics.js';
 
 /** @typedef {import('../config.js').Config} Config */
 /** @typedef {import('fastify').FastifyInstance} FastifyInstance */
@@ -187,6 +188,7 @@ export class BackupApi {
         '# HELP backup_stored_bytes Bytes of the kept backups per source.',
         '# TYPE backup_stored_bytes gauge',
         ...items.map((x) => `backup_stored_bytes{source="${label(x.id)}"} ${x.bytes}`),
+        ...AuditMetrics.lines(this.audit),
         '# HELP backup_process_uptime_seconds Process uptime.',
         '# TYPE backup_process_uptime_seconds gauge',
         `backup_process_uptime_seconds ${process.uptime().toFixed(0)}`,

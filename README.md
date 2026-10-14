@@ -101,6 +101,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-backup.backup.create` (meta: sour
 
 Request logs with request id and trace context; `/metrics` (last success time, last outcome, stored count and bytes per source); `/v1/stats` (failing, stale); `/ready`.
 
+Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
+
 ## Backup / restore
 
 Of this service: `DB_PATH` holds only records; the data is the files in `BACKUP_DIR` (and their atc-media copies). Of the sources: [examples/restore.md](examples/restore.md).
