@@ -5,7 +5,7 @@ MEDIA_URL=http://media.internal:3003
 MEDIA_API_KEY=<a media key>
 ```
 
-atc-media must accept the type: add `application/vnd.sqlite3` to its `ALLOWED_TYPES`.
+atc-media must accept the types: add `application/vnd.sqlite3` (databases), `application/gzip` (trees) and `application/vnd.atc-backup` (encrypted backups) to its `ALLOWED_TYPES`.
 
 After every successful backup (and its retention run), the file is streamed to atc-media as a private file named like the backup. The backup records the result:
 
