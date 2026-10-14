@@ -1,0 +1,31 @@
+{
+  "name": "@atc-web/atc-backup",
+  "version": "1.18.0",
+  "private": true,
+  "description": "Scheduled online SQLite backups of the services' data files: integrity-checked, checksummed copies with retention, download, verify, safe restore and optional upload to atc-media",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alitalipcalikoglu/atc-backup.git"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch --env-file=.env src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\"",
+    "typecheck": "tsc -p jsconfig.json"
+  },
+  "dependencies": {
+    "@atc-web/atc-service-core": "github:alitalipcalikoglu/atc-service-core#v1.18.0",
+    "@fastify/rate-limit": "11.2.0",
+    "fastify": "5.12.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "typescript": "7.0.2"
+  }
+}
