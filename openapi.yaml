@@ -1,0 +1,351 @@
+openapi: 3.1.0
+info:
+  title: atc-backup
+  version: "1.0.0"
+  description: >
+    Scheduled online backups of the platform's SQLite data files. Each backup is taken through
+    SQLite's backup API while the owning service keeps running, stored as one self-contained file,
+    checked with `PRAGMA integrity_check` and recorded with its SHA-256. Retention keeps the newest
+    `RETENTION_COUNT` backups per source and drops those older than `RETENTION_DAYS` (the newest is
+    always kept). Restores write to a new file in `RESTORE_DIR`; replacing a live database needs
+    `ALLOW_LIVE_RESTORE=true`, `confirm` set to the source id, and takes a safety backup first.
+
+
+    Auth: `Authorization: Bearer <api-key>` on every `/v1/*` and `/metrics` route. Roles: `read`
+    (sources, backups, stats) and `admin` (also run, download, verify, restore, delete). A key may be
+    scoped to sources (`id:secret:role:source+source`); it gets `403` for other sources and `404` for
+    their backups, and sees only its sources in lists and stats.
+servers:
+  - url: /
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: sources
+  - name: backups
+  - name: stats
+  - name: ops
+paths:
+  /openapi.yaml:
+    get:
+      operationId: atc-backup.openapi
+      summary: Download the canonical OpenAPI document
+      security: []
+      responses:
+        "200": { description: Canonical OpenAPI document., content: { text/yaml: { schema: { type: string } } } }
+  /health:
+    get:
+      operationId: atc-backup.health.get
+      summary: Liveness probe
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: Process is up., content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } } } } }
+  /ready:
+    get:
+      operationId: atc-backup.ready.get
+      summary: Readiness probe
+      description: Database ping and a writable BACKUP_DIR, cached for 10 seconds. The body also says how backups are scheduled and whether media upload and live restores are enabled.
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, sources, schedule, media, liveRestore]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  sources: { type: integer }
+                  schedule: { type: string, description: "`every N min` or `manual`." }
+                  media: { type: string, enum: [enabled, disabled] }
+                  liveRestore: { type: string, enum: [enabled, disabled] }
+        "503": { description: The cached readiness check last failed., content: { application/json: { schema: { type: object, required: [status, error], properties: { status: { type: string, enum: [unavailable] }, error: { type: string } } } } } }
+  /v1/info:
+    get:
+      operationId: atc-backup.info.get
+      summary: Service identity and capabilities
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Instance identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, version, apiVersion, capabilities, schemaVersion, serviceCore]
+                properties:
+                  service: { type: string, const: atc-backup }
+                  version: { type: string }
+                  apiVersion: { type: string, const: v1 }
+                  capabilities: { type: array, items: { type: string }, description: "`online-backup`, `integrity-check`, `sha256`, `retention`, `restore-to-file`, `live-restore`, `media-upload`, `source-scoped-keys`." }
+                  schemaVersion: { type: integer }
+                  serviceCore: { type: string }
+  /metrics:
+    get:
+      operationId: atc-backup.metrics.get
+      summary: Prometheus text-format metrics
+      description: Requires a `read`-capable key. Not rate-limited. A source-scoped key sees only its sources.
+      tags: [ops]
+      x-stack-visibility: operational
+      responses:
+        "200": { description: "`backup_last_success_timestamp_seconds{source}`, `backup_last_ok{source}`, `backup_stored{source}`, `backup_stored_bytes{source}`, `backup_process_uptime_seconds`.", content: { text/plain: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/sources:
+    get:
+      operationId: atc-backup.sources.list
+      summary: Configured sources with their newest backup
+      tags: [sources]
+      responses:
+        "200":
+          description: Sources visible to the key, in BACKUP_SOURCES order.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Source" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/sources/{id}:
+    parameters: [{ $ref: "#/components/parameters/SourceParam" }]
+    get:
+      operationId: atc-backup.sources.get
+      summary: One source
+      tags: [sources]
+      responses:
+        "200": { description: The source., content: { application/json: { schema: { type: object, required: [source], properties: { source: { $ref: "#/components/schemas/Source" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sources/{id}/backups:
+    parameters: [{ $ref: "#/components/parameters/SourceParam" }]
+    post:
+      operationId: atc-backup.sources.backup
+      summary: Back up a source now (admin)
+      description: Waits for the backup to finish. A failed attempt is recorded too and returned with `status` `failed` and its `error`; check `status`. Retention and the media upload run right after a successful backup.
+      tags: [sources]
+      responses:
+        "201": { $ref: "#/components/responses/OneBackup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/backups:
+    get:
+      operationId: atc-backup.backups.list
+      summary: Backups, newest first
+      tags: [backups]
+      parameters:
+        - { name: source, in: query, schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" } }
+        - { name: status, in: query, schema: { type: string, enum: [running, ok, failed] } }
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|100)$" }, description: "1-100, default 50." }
+        - { name: cursor, in: query, schema: { type: string }, description: "`nextCursor` of the previous page." }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Backup" } }, nextCursor: { type: [string, "null"] } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/backups/{id}:
+    parameters: [{ $ref: "#/components/parameters/BackupParam" }]
+    get:
+      operationId: atc-backup.backups.get
+      summary: One backup
+      tags: [backups]
+      responses:
+        "200": { $ref: "#/components/responses/OneBackup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: atc-backup.backups.delete
+      summary: Delete a backup and its file (admin)
+      description: Its atc-media copy is deleted too, best effort. A running backup cannot be deleted.
+      tags: [backups]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/backups/{id}/download:
+    parameters: [{ $ref: "#/components/parameters/BackupParam" }]
+    get:
+      operationId: atc-backup.backups.download
+      summary: Download the backup file (admin)
+      description: A complete SQLite database. `X-Checksum-SHA256` carries the recorded checksum; compare it after the download.
+      tags: [backups]
+      responses:
+        "200":
+          description: The file, as an attachment.
+          headers:
+            x-checksum-sha256: { schema: { type: string } }
+          content:
+            application/vnd.sqlite3: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/backups/{id}/verify:
+    parameters: [{ $ref: "#/components/parameters/BackupParam" }]
+    post:
+      operationId: atc-backup.backups.verify
+      summary: Re-check a stored backup (admin)
+      description: Recomputes the SHA-256 and runs `PRAGMA integrity_check` on the stored file. The result is recorded on the backup (`verified`, `verifiedAt`).
+      tags: [backups]
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backup, checksumOk, integrity]
+                properties:
+                  backup: { $ref: "#/components/schemas/Backup" }
+                  checksumOk: { type: boolean }
+                  integrity: { type: string, description: "`ok`, or the first problem found." }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/backups/{id}/restore:
+    parameters: [{ $ref: "#/components/parameters/BackupParam" }]
+    post:
+      operationId: atc-backup.backups.restore
+      summary: Write a backup out (admin)
+      description: >
+        The checksum is checked first; a mismatch restores nothing. With `target`, the file is
+        written as `RESTORE_DIR/<target>` (a plain file name; an existing file needs
+        `overwrite: true`). With `live: true` the source's live database is replaced: needs
+        `ALLOW_LIVE_RESTORE=true` and `confirm` equal to the source id, takes a `pre-restore` safety
+        backup of the current file and removes its stale `-wal`/`-shm` files. Stop the owning
+        service before a live restore and start it afterwards.
+      tags: [backups]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                target: { type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }
+                overwrite: { type: boolean }
+                live: { type: boolean }
+                confirm: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backup, live, target, size, sha256, safetyBackupId]
+                properties:
+                  backup: { $ref: "#/components/schemas/Backup" }
+                  live: { type: boolean }
+                  target: { type: string, description: The file name in RESTORE_DIR, or the source id for a live restore. }
+                  size: { type: integer }
+                  sha256: { type: string }
+                  safetyBackupId: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "`FORBIDDEN` or `LIVE_RESTORE_DISABLED`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/stats:
+    get:
+      operationId: atc-backup.stats.get
+      summary: Totals and sources that need attention
+      tags: [stats]
+      responses:
+        "200":
+          description: Totals over the sources visible to the key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources, backups, bytes, failing, stale, running, intervalMin, retentionCount, retentionDays, media, liveRestore]
+                properties:
+                  sources: { type: integer }
+                  backups: { type: integer, description: Successful backups kept. }
+                  bytes: { type: integer }
+                  failing: { type: array, items: { type: string }, description: Sources whose newest attempt failed. }
+                  stale: { type: array, items: { type: string }, description: "Scheduled sources with no good backup within two intervals." }
+                  running: { type: array, items: { type: string } }
+                  intervalMin: { type: integer }
+                  retentionCount: { type: integer }
+                  retentionDays: { type: integer }
+                  media: { type: boolean }
+                  liveRestore: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: "`BACKUP_API_KEYS=id:secret:role[:source+source]`; role `read` or `admin`."
+  parameters:
+    SourceParam: { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" } }
+    BackupParam: { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/BackupId" } }
+  responses:
+    BadRequest: { description: "`VALIDATION_FAILED` or `INVALID_ARGUMENT`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Unauthorized: { description: Missing or invalid API key., headers: { www-authenticate: { schema: { type: string, const: Bearer } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Forbidden: { description: "`FORBIDDEN`: role or source scope.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    NotFound: { description: "`SOURCE_NOT_FOUND` or `BACKUP_NOT_FOUND`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Conflict: { description: "`BUSY`, `INVALID_STATE`, `TARGET_EXISTS`, `CHECKSUM_MISMATCH`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    OneBackup: { description: The backup., content: { application/json: { schema: { type: object, required: [backup], properties: { backup: { $ref: "#/components/schemas/Backup" } } } } } }
+  schemas:
+    ErrorEnvelope: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string }, details: {} } } } }
+    BackupId: { type: string, pattern: "^bk_[0-9a-z]{6,12}[0-9a-f]{16}$" }
+    Backup:
+      type: object
+      properties:
+        id: { $ref: "#/components/schemas/BackupId" }
+        source: { type: string }
+        status: { type: string, enum: [running, ok, failed] }
+        trigger: { type: string, enum: [schedule, manual, pre-restore] }
+        file: { type: [string, "null"] }
+        size: { type: [integer, "null"] }
+        sha256: { type: [string, "null"] }
+        pages: { type: [integer, "null"] }
+        error: { type: [string, "null"] }
+        createdBy: { type: string, description: API key id, or `scheduler`. }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        durationMs: { type: [integer, "null"] }
+        verifiedAt: { type: [string, "null"], format: date-time }
+        verified: { type: [boolean, "null"] }
+        media: { type: [object, "null"], properties: { fileId: { type: [string, "null"] }, error: { type: [string, "null"] } } }
+    Source:
+      type: object
+      properties:
+        id: { type: string }
+        file: { type: string, description: Base name of the live file; the full path is not exposed. }
+        exists: { type: boolean }
+        size: { type: [integer, "null"] }
+        running: { type: boolean }
+        lastBackup: { oneOf: [{ $ref: "#/components/schemas/Backup" }, { type: "null" }] }
+        lastOkAt: { type: [string, "null"], format: date-time }
+        backups: { type: integer }
+        bytes: { type: integer }
+        nextDueAt: { type: [string, "null"], format: date-time }
