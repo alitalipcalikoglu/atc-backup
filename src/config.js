@@ -69,7 +69,7 @@ export class Config {
         retentionCount: r.integer('RETENTION_COUNT', 14, { min: 1, max: 10_000 }),
         retentionDays: r.integer('RETENTION_DAYS', 30, { min: 0, max: 36_500 }),
         tickMs: r.integer('TICK_MS', 60_000, { min: 1_000 }),
-        pagesPerStep: r.integer('PAGES_PER_STEP', 1_000, { min: 1 }),
+        pagesPerStep: r.integer('PAGES_PER_STEP', 100_000, { min: 1 }),
       },
       allowLiveRestore: r.boolean('ALLOW_LIVE_RESTORE', false),
     });
