@@ -127,7 +127,7 @@ export class BackupApi {
 
     api.get('/backups/:id/download', { config: { audit: AuditClient.route('atc-backup.backup.download', target, (r) => ({ source: s.store.get(/** @type {any} */ (r.params).id)?.source })) }, ...admin, schema: { params: Schemas.idParams } }, async (request, reply) => {
       const f = await s.file(backupOf(request).id);
-      reply.header('content-type', f.row.encrypted ? 'application/octet-stream' : f.row.format === 'tar.gz' ? 'application/gzip' : 'application/vnd.sqlite3');
+      reply.header('content-type', f.row.encrypted ? 'application/vnd.atc-backup' : f.row.format === 'tar.gz' ? 'application/gzip' : 'application/vnd.sqlite3');
       reply.header('content-disposition', `attachment; filename="${f.row.file}"`);
       reply.header('content-length', String(f.size));
       reply.header('x-checksum-sha256', String(f.row.sha256));

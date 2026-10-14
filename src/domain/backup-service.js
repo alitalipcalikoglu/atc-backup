@@ -474,7 +474,7 @@ export class BackupService {
     if (!this.media) return;
     const row = this.get(id);
     try {
-      const type = row.encrypted ? 'application/octet-stream' : row.format === 'tar.gz' ? 'application/gzip' : 'application/vnd.sqlite3';
+      const type = row.encrypted ? 'application/vnd.atc-backup' : row.format === 'tar.gz' ? 'application/gzip' : 'application/vnd.sqlite3';
       const f = await this.media.upload(this.pathOf(row), /** @type {string} */ (row.file), type, this.stopping.signal);
       this.store.setMedia(id, f.id, null);
     } catch (err) {

@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises';
 /**
  * Off-host copies: each successful backup is streamed into atc-media as a private file. atc-media
  * must list the stored types in its ALLOWED_TYPES: `application/vnd.sqlite3` (databases), `application/gzip` (trees) and
- * `application/octet-stream` (encrypted backups).
+ * `application/vnd.atc-backup` (encrypted backups).
  */
 export class MediaClient {
   /**
