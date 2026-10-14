@@ -3,6 +3,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { chmod, copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync, backup as sqliteBackup } from 'node:sqlite';
+import { EventPublisher } from '../events/event-publisher.js';
 import { BackupError } from './errors.js';
 
 /** @typedef {import('../types.js').BackupRow} BackupRow */
@@ -26,13 +27,18 @@ export class BackupService {
    * @param {import('../config.js').Config} deps.config
    * @param {import('../store/backup-store.js').BackupStore} deps.store
    * @param {import('../net/media-client.js').MediaClient|null} [deps.media]
+   * @param {EventPublisher} [deps.events]
    * @param {() => number} [deps.now]
    * @param {import('../types.js').Logger} [deps.logger]
    */
-  constructor({ config, store, media = null, now = Date.now, logger }) {
+  constructor({ config, store, media = null, events = new EventPublisher({ source: 'atc-backup', target: null }), now = Date.now, logger }) {
     this.config = config;
     this.store = store;
     this.media = media;
+    this.events = events;
+    /** @type {Map<string, number>} */
+    this.staleSent = new Map();
+    this.startedAt = now();
     this.now = now;
     this.logger = logger;
     this.stopping = new AbortController();
@@ -101,7 +107,9 @@ export class BackupService {
     this.store.insert(id, source.id, trigger, by, this.now());
     return this.#serial(async () => {
       try {
-        return await this.#backupInto(source, id);
+        const row = await this.#backupInto(source, id);
+        this.#announce(row);
+        return row;
       } finally {
         this.busy.delete(source.id);
       }
@@ -210,6 +218,29 @@ export class BackupService {
       } catch (err) {
         this.logger?.error({ err, source: s.id }, 'scheduled backup failed');
       }
+    }
+    this.checkStale();
+  }
+
+  /** Events for a finished backup: `backup.completed`, or `ops.backup.failed` for a failed copy or a failed media upload. @param {BackupRow} row */
+  #announce(row) {
+    const base = { source: row.source, id: row.id, trigger: row.trigger };
+    if (row.status !== 'ok') this.events.publish('ops.backup.failed', { ...base, stage: 'backup', error: row.error });
+    else if (row.media_error) this.events.publish('ops.backup.failed', { ...base, stage: 'upload', error: row.media_error });
+    else this.events.publish('backup.completed', { ...base, size: row.size, sha256: row.sha256 });
+  }
+
+  /** `ops.backup.stale` once per interval for a source with no successful backup for two intervals (a source that never succeeded counts from the service start). */
+  checkStale() {
+    const every = this.config.schedule.intervalMin * 60_000;
+    if (!every) return;
+    const now = this.now();
+    const sums = this.store.summary();
+    for (const s of this.config.sources) {
+      const lastOk = sums.get(s.id)?.lastOkAt ?? this.startedAt;
+      if (now - lastOk < 2 * every || now - (this.staleSent.get(s.id) ?? 0) < every) continue;
+      this.staleSent.set(s.id, now);
+      this.events.publish('ops.backup.stale', { source: s.id, lastOkAt: sums.get(s.id)?.lastOkAt ?? null, ageSec: Math.floor((now - lastOk) / 1000) });
     }
   }
 

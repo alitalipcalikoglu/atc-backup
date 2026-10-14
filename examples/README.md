@@ -12,6 +12,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Off-host copies in atc-media](media-copies.md) | Uploading each backup to atc-media, failures |
 | [API keys, roles and scopes](keys-and-roles.md) | read, admin; keys scoped to sources |
 | [Operations](operations.md) | Health, readiness, metrics, stats, PM2, Docker |
+| [Events](events.md) | `backup.completed`, `ops.backup.failed`, `ops.backup.stale` through atc-webhook-out |
 | [Audit events](audit-events.md) | Which actions are forwarded to the audit service |
 
 ```bash

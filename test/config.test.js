@@ -29,3 +29,9 @@ test('Config: rejects bad input', () => {
   bad({ MEDIA_URL: 'http://media' }, /must be set together/);
   bad({ TLS_KEY_PATH: '/k.pem' }, /must be set together/);
 });
+
+test('Config: WEBHOOK_OUT_URL and WEBHOOK_OUT_API_KEY come together', () => {
+  assert.equal(Config.fromEnv(testEnv('/tmp/x')).events, null);
+  assert.equal(Config.fromEnv(testEnv('/tmp/x', { WEBHOOK_OUT_URL: 'http://h:3009/', WEBHOOK_OUT_API_KEY: 'k' })).events?.url, 'http://h:3009');
+  assert.throws(() => Config.fromEnv(testEnv('/tmp/x', { WEBHOOK_OUT_URL: 'http://h' })), ConfigError);
+});

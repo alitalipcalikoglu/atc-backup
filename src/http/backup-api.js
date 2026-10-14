@@ -189,6 +189,7 @@ export class BackupApi {
         '# TYPE backup_stored_bytes gauge',
         ...items.map((x) => `backup_stored_bytes{source="${label(x.id)}"} ${x.bytes}`),
         ...AuditMetrics.lines(this.audit),
+        ...this.service.events.metricLines(),
         '# HELP backup_process_uptime_seconds Process uptime.',
         '# TYPE backup_process_uptime_seconds gauge',
         `backup_process_uptime_seconds ${process.uptime().toFixed(0)}`,

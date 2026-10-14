@@ -51,6 +51,7 @@
  * @property {ApiKey[]} apiKeys
  * @property {number} rateLimitMax
  * @property {MediaTarget|null} media
+ * @property {{ url: string, apiKey: string, timeoutMs: number }|null} events  atc-webhook-out target for operational events (null = off).
  * @property {Schedule} schedule
  * @property {boolean} allowLiveRestore
  */

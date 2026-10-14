@@ -1,6 +1,8 @@
 import { resolve } from 'node:path';
 import { ConfigError, EnvReader, parseApiKeys, parseAudit } from '@atc-web/atc-service-core/config';
 
+import { EventPublisher } from './events/event-publisher.js';
+
 /** @typedef {import('./types.js').ApiKey} ApiKey */
 /** @typedef {import('./types.js').KeyRole} KeyRole */
 /** @typedef {import('./types.js').Source} Source */
@@ -29,6 +31,7 @@ export class Config {
     this.apiKeys = v.apiKeys;
     this.rateLimitMax = v.rateLimitMax;
     this.media = v.media;
+    this.events = v.events;
     this.schedule = Object.freeze({ ...v.schedule });
     this.allowLiveRestore = v.allowLiveRestore;
     Object.freeze(this);
@@ -64,6 +67,7 @@ export class Config {
       apiKeys: Config.#parseApiKeys(r.required('BACKUP_API_KEYS'), sources),
       rateLimitMax: r.integer('RATE_LIMIT_MAX', 600, { min: 1 }),
       media: Config.#parseMedia(r),
+      events: EventPublisher.parseEnv(r, ConfigError),
       schedule: {
         intervalMin: r.integer('BACKUP_INTERVAL_MIN', 360, { min: 0, max: 525_600 }),
         retentionCount: r.integer('RETENTION_COUNT', 14, { min: 1, max: 10_000 }),

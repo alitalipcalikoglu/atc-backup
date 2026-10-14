@@ -60,6 +60,7 @@ Sources, backups, retention, download and verify, restore, media copies, scoped 
 | `MEDIA_URL`, `MEDIA_API_KEY`, `MEDIA_TIMEOUT_MS` | empty, empty, `120000` | Upload each backup to atc-media (both or neither) |
 | `DB_PATH`, `DB_BACKUP_DIR`, `BODY_LIMIT`, `RATE_LIMIT_MAX` | `./data/backup.db`, –, `16384`, `600` | |
 | `TRUST_PROXY`, `TLS_CERT_PATH`, `TLS_KEY_PATH`, `LOG_LEVEL` | | As in every service |
+| `WEBHOOK_OUT_URL`, `WEBHOOK_OUT_API_KEY`, `WEBHOOK_OUT_TIMEOUT_MS` | empty, empty, `5000` | Publish events to atc-webhook-out (URL and key both or neither; a `publish` key) |
 | `AUDIT_URL`, `AUDIT_API_KEY` | empty | Forward audit events (both or neither) |
 
 ## Security notes
@@ -89,6 +90,10 @@ test/                      node:test suites
 - Point-in-time recovery between backups (WAL shipping).
 - Stopping and starting the owning service around a live restore; the operator does that.
 
+## Events
+
+With `WEBHOOK_OUT_URL` set the service publishes `backup.completed`, `ops.backup.failed` (a failed copy, or a failed upload to atc-media) and `ops.backup.stale` (no successful backup of a source for two intervals; once per interval). Best effort, bounded queue; see [examples/events.md](examples/events.md).
+
 ## Audit events
 
 With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-backup.backup.create` (meta: source, status), `atc-backup.backup.download` (meta: source), `atc-backup.backup.verify` (meta: checksumOk, integrity), `atc-backup.backup.restore` (meta: live, target, safetyBackupId) and `atc-backup.backup.delete` (meta: source) are forwarded with `success`, or `denied` on 403. Scheduled runs and retention are not audited. Details: [examples/audit-events.md](examples/audit-events.md).
@@ -100,6 +105,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-backup.backup.create` (meta: sour
 ## Observability
 
 Request logs with request id and trace context; `/metrics` (last success time, last outcome, stored count and bytes per source); `/v1/stats` (failing, stale); `/ready`.
+
+Event publishing is observable as `events_publish_enabled`, `events_publish_total{result="published|sent|dropped|failed"}` and `events_publish_pending`.
 
 Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
 

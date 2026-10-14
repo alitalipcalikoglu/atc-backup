@@ -173,3 +173,26 @@ test('permissions: backup and restore dirs are 0700, backup and restored files 0
   assert.equal(mode(join(w.dir, 'restores')), 0o700);
   assert.equal(mode(join(w.dir, 'restores', 'copy.db')), 0o600);
 });
+
+test('events: completed and failed backups are published; stale after two silent intervals, once per interval', async (t) => {
+  const w = workspace();
+  t.after(w.cleanup);
+  const clock = manualClock();
+  /** @type {[string, any][]} */ const out = [];
+  const events = { publish: (/** @type {string} */ type, /** @type {any} */ data) => { out.push([type, data]); return true; } };
+  const { service } = testService(w.dir, { BACKUP_INTERVAL_MIN: '60' }, { now: clock.now, events });
+  await service.tick();
+  assert.deepEqual(out.map(([ty, d]) => `${ty}:${d.source}`).sort(), ['backup.completed:app', 'backup.completed:logs', 'ops.backup.failed:gone']);
+  assert.equal(out.find(([ty]) => ty === 'ops.backup.failed')?.[1].stage, 'backup');
+  out.length = 0;
+  clock.advance(130 * 60_000);
+  service.checkStale();
+  assert.deepEqual(out.map(([ty, d]) => `${ty}:${d.source}`).sort(), ['ops.backup.stale:app', 'ops.backup.stale:gone', 'ops.backup.stale:logs'], 'two intervals without a success');
+  assert.equal(out[0]?.[1].ageSec > 0, true);
+  out.length = 0;
+  service.checkStale();
+  assert.equal(out.length, 0, 'once per interval');
+  clock.advance(61 * 60_000);
+  service.checkStale();
+  assert.equal(out.length, 3);
+});

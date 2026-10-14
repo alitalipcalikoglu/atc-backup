@@ -3,6 +3,7 @@ import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { Lifecycle } from '@atc-web/atc-service-core/lifecycle';
 import { readServiceVersion } from '@atc-web/atc-service-core/fastify';
 import { Database } from './db.js';
+import { EventPublisher } from './events/event-publisher.js';
 import { BackupService } from './domain/backup-service.js';
 import { BackupApi } from './http/backup-api.js';
 import { MediaClient } from './net/media-client.js';
@@ -15,9 +16,10 @@ export class Application {
     this.config = config;
     this.version = readServiceVersion(import.meta.url);
     this.audit = new AuditClient({ target: config.audit });
+    this.events = new EventPublisher({ source: 'atc-backup', target: config.events });
     this.db = new Database(config.dbPath, { backupDir: config.dbBackupDir });
     this.store = new BackupStore(this.db);
-    this.service = new BackupService({ config, store: this.store, media: config.media ? new MediaClient(config.media) : null });
+    this.service = new BackupService({ config, store: this.store, media: config.media ? new MediaClient(config.media) : null, events: this.events });
     /** @type {import('fastify').FastifyInstance|null} */
     this.app = null;
     /** @type {NodeJS.Timeout|null} */
@@ -58,12 +60,14 @@ export class Application {
         () => { if (this.timer) clearInterval(this.timer); this.service.stopping.abort(); },
         () => this.app?.close(),
         () => this.service.idle(),
+        () => this.events.close(),
         () => this.audit.close(),
         () => this.db.close(),
       ],
     });
     this.shutdown = shutdown;
     this.audit.logger = app.log;
+    this.events.logger = app.log;
     this.audit.start();
     await app.listen({ port: config.port, host: config.host });
     app.log.info({ tls: config.tls !== null, sources: config.sources.map((s) => s.id), intervalMin: config.schedule.intervalMin }, config.tls ? 'serving HTTPS' : 'serving plain HTTP, terminate TLS at a reverse proxy');
