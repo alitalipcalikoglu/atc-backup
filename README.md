@@ -18,11 +18,13 @@ Tests and type check: `npm test`, `npm run typecheck`.
 
 ## Model
 
-- **Source**: `id=path` from `BACKUP_SOURCES`, the live SQLite file of another service. Paths come only from configuration.
+- **Source**: `id=path` from `BACKUP_SOURCES` (the live SQLite file of another service, copied online) or from `BACKUP_TREES` (a file or directory such as media blobs or key files, packed into a `.tar.gz` by the system `tar`). Paths come only from configuration.
 - **Backup**: one attempt for one source, `status` `running`, `ok` or `failed`, `trigger` `schedule`, `manual` or `pre-restore`. An `ok` backup has a file in `BACKUP_DIR/<source>/`, its size, page count and SHA-256.
 - **Schedule**: every `BACKUP_INTERVAL_MIN` per source, counted from the newest attempt; `0` = manual only. Backups and restores run one at a time.
 - **Retention**: after each successful backup, keep the newest `RETENTION_COUNT`, drop those older than `RETENTION_DAYS`; the newest is always kept.
-- **Restore**: to `RESTORE_DIR/<target>`, or (with `ALLOW_LIVE_RESTORE=true` and `confirm`) over the live file after a safety backup.
+- **Restore**: to `RESTORE_DIR/<target>` (a file, or a directory for a tree), or (databases only, with `ALLOW_LIVE_RESTORE=true` and `confirm`) over the live file after a safety backup.
+- **Encryption**: with `BACKUP_ENCRYPTION_KEY` (64 hex characters) every new backup is stored AES-256-GCM encrypted (`*.enc`); verify, drill and restore decrypt on the fly; `npm run decrypt` opens a file outside the service.
+- **Restore drill**: every `DRILL_INTERVAL_HOURS` (24) the newest backup of each source is restored into a scratch place and read back (row counts of every table, or every archive entry); a failure publishes `ops.backup.failed`.
 
 ## API
 
@@ -36,6 +38,7 @@ Tests and type check: `npm test`, `npm run typecheck`.
 | GET / DELETE | `/v1/backups/:id` | read / admin | One backup; delete it and its file |
 | GET | `/v1/backups/:id/download` | admin | The file, with `X-Checksum-SHA256` |
 | POST | `/v1/backups/:id/verify` | admin | Re-hash and integrity check |
+| POST | `/v1/backups/:id/drill` | admin | Restore drill: unpack into a scratch place and read it back |
 | POST | `/v1/backups/:id/restore` | admin | `{ target, overwrite }` or `{ live: true, confirm }` |
 | GET | `/v1/stats` | read | Totals, failing and stale sources |
 
@@ -52,6 +55,9 @@ Sources, backups, retention, download and verify, restore, media copies, scoped 
 | `PORT`, `HOST` | `3017`, `0.0.0.0` | Listen address |
 | `BACKUP_API_KEYS` | required | `id:secret:role[:source+source]`; role `read` or `admin` |
 | `BACKUP_SOURCES` | empty | `id=path,…`; relative paths resolve against the working directory |
+| `BACKUP_TREES` | empty | `id=path,…` for files and directories (packed as tar.gz; needs `tar` on the host) |
+| `BACKUP_ENCRYPTION_KEY` | empty | 64 hex characters; backups are encrypted at rest when set. Keep the key outside the backup volume: without it the files cannot be opened |
+| `DRILL_INTERVAL_HOURS` | `24` | Restore drill of the newest backup per source; `0` = off |
 | `BACKUP_DIR`, `RESTORE_DIR` | `./data/backups`, `./data/restores` | Created 0700; files 0600 |
 | `BACKUP_INTERVAL_MIN` | `360` | Minutes between scheduled backups; `0` = manual only |
 | `RETENTION_COUNT`, `RETENTION_DAYS` | `14`, `30` | Kept per source; `0` days = no age limit |
@@ -85,8 +91,9 @@ test/                      node:test suites
 
 ## Out of scope by design
 
-- Databases other than SQLite, and files on other hosts (mount them; there is no agent).
-- Compression and encryption at rest of the backup files (use an encrypted volume; atc-media copies are private files).
+- Databases other than SQLite, and files on other hosts (mount them; there is no agent). Trees are archived by the system `tar`, so a very large tree takes proportionally long and is a full copy each time.
+- Key rotation for encrypted backups: a new key applies to new backups; older files need the key they were written with.
+- Incremental or deduplicated tree backups: every tree backup is a full archive.
 - Point-in-time recovery between backups (WAL shipping).
 - Stopping and starting the owning service around a live restore; the operator does that.
 

@@ -3,7 +3,8 @@ import { stat } from 'node:fs/promises';
 
 /**
  * Off-host copies: each successful backup is streamed into atc-media as a private file. atc-media
- * must list `application/vnd.sqlite3` in its ALLOWED_TYPES.
+ * must list the stored types in its ALLOWED_TYPES: `application/vnd.sqlite3` (databases), `application/gzip` (trees) and
+ * `application/octet-stream` (encrypted backups).
  */
 export class MediaClient {
   /**
@@ -17,14 +18,14 @@ export class MediaClient {
 
   /**
    * Never retried: a failed upload leaves nothing behind on the media side.
-   * @param {string} path @param {string} name @param {AbortSignal} signal
+   * @param {string} path @param {string} name @param {string} contentType @param {AbortSignal} signal
    * @returns {Promise<{ id: string, size: number }>}
    */
-  async upload(path, name, signal) {
+  async upload(path, name, contentType, signal) {
     const { size } = await stat(path);
     const res = await this.fetch(`${this.target.url}/v1/files?visibility=private&name=${encodeURIComponent(name)}`, {
       method: 'PUT',
-      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/vnd.sqlite3', 'content-length': String(size) },
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': contentType, 'content-length': String(size) },
       body: /** @type {any} */ (createReadStream(path)),
       // @ts-ignore -- Node's fetch needs duplex for a streamed request body.
       duplex: 'half',

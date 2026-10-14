@@ -47,12 +47,12 @@ export function testEnv(dir, overrides = {}) {
   };
 }
 
-/** @param {string} dir @param {Record<string, string>} [overrides] @param {{ now?: () => number, media?: any, events?: any }} [o] */
+/** @param {string} dir @param {Record<string, string>} [overrides] @param {{ now?: () => number, media?: any, publisher?: any }} [o] */
 export function testService(dir, overrides, o = {}) {
   const config = Config.fromEnv(testEnv(dir, overrides));
   const db = new Database(':memory:');
   const store = new BackupStore(db);
-  const service = new BackupService({ config, store, media: o.media ?? null, events: o.events, now: o.now });
+  const service = new BackupService({ config, store, media: o.media ?? null, publisher: o.publisher, now: o.now });
   return { config, db, store, service };
 }
 

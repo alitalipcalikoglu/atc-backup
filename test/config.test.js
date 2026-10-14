@@ -31,7 +31,22 @@ test('Config: rejects bad input', () => {
 });
 
 test('Config: WEBHOOK_OUT_URL and WEBHOOK_OUT_API_KEY come together', () => {
-  assert.equal(Config.fromEnv(testEnv('/tmp/x')).events, null);
-  assert.equal(Config.fromEnv(testEnv('/tmp/x', { WEBHOOK_OUT_URL: 'http://h:3009/', WEBHOOK_OUT_API_KEY: 'k' })).events?.url, 'http://h:3009');
+  assert.equal(Config.fromEnv(testEnv('/tmp/x')).webhookOut, null);
+  assert.equal(Config.fromEnv(testEnv('/tmp/x', { WEBHOOK_OUT_URL: 'http://h:3009/', WEBHOOK_OUT_API_KEY: 'k' })).webhookOut?.url, 'http://h:3009');
   assert.throws(() => Config.fromEnv(testEnv('/tmp/x', { WEBHOOK_OUT_URL: 'http://h' })), ConfigError);
+});
+
+test('Config: BACKUP_TREES, the encryption key and the drill interval', () => {
+  const keys = { BACKUP_API_KEYS: `a:${'a'.repeat(40)}:admin` };
+  const c = Config.fromEnv(testEnv('/w', { ...keys, BACKUP_SOURCES: 'a=/w/a.db', BACKUP_TREES: 'media=/data/media/objects', BACKUP_ENCRYPTION_KEY: 'AB'.repeat(32), DRILL_INTERVAL_HOURS: '12' }));
+  assert.deepEqual(c.sources.map((s) => [s.id, s.kind]), [['a', 'sqlite'], ['media', 'tree']]);
+  assert.deepEqual([c.encryptionKey, c.drillIntervalHours], ['ab'.repeat(32), 12]);
+  const plain = Config.fromEnv(testEnv('/w', keys));
+  assert.deepEqual([plain.encryptionKey, plain.drillIntervalHours], [null, 24]);
+  const bad = (/** @type {Record<string, string>} */ o, /** @type {RegExp} */ re) => assert.throws(() => Config.fromEnv(testEnv('/w', { ...keys, ...o })), (e) => e instanceof ConfigError && re.test(e.message));
+  bad({ BACKUP_ENCRYPTION_KEY: 'short' }, /64 hex/);
+  bad({ BACKUP_SOURCES: 'a=/w/a.db', BACKUP_TREES: 'a=/w/dir' }, /also a BACKUP_SOURCES id/);
+  bad({ BACKUP_SOURCES: 'a=/w/a.db', BACKUP_TREES: 'b=/w/a.db' }, /also a BACKUP_SOURCES path/);
+  bad({ BACKUP_TREES: 'b=/w' }, /contains BACKUP_DIR or RESTORE_DIR/);
+  bad({ BACKUP_TREES: 'b=/w/backups/x' }, /inside BACKUP_DIR/);
 });

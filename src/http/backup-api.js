@@ -127,7 +127,7 @@ export class BackupApi {
 
     api.get('/backups/:id/download', { config: { audit: AuditClient.route('atc-backup.backup.download', target, (r) => ({ source: s.store.get(/** @type {any} */ (r.params).id)?.source })) }, ...admin, schema: { params: Schemas.idParams } }, async (request, reply) => {
       const f = await s.file(backupOf(request).id);
-      reply.header('content-type', 'application/vnd.sqlite3');
+      reply.header('content-type', f.row.encrypted ? 'application/octet-stream' : f.row.format === 'tar.gz' ? 'application/gzip' : 'application/vnd.sqlite3');
       reply.header('content-disposition', `attachment; filename="${f.row.file}"`);
       reply.header('content-length', String(f.size));
       reply.header('x-checksum-sha256', String(f.row.sha256));
@@ -137,6 +137,11 @@ export class BackupApi {
     api.post('/backups/:id/verify', { config: { audit: AuditClient.route('atc-backup.backup.verify', target, (_r, b) => ({ checksumOk: b?.checksumOk, integrity: b?.integrity })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
       const r = await s.verify(backupOf(request).id);
       return { backup: Views.backup(r.backup), checksumOk: r.checksumOk, integrity: r.integrity };
+    });
+
+    api.post('/backups/:id/drill', { config: { audit: AuditClient.route('atc-backup.backup.drill', target, (_r, b) => ({ ok: b?.ok })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
+      const r = await s.drill(backupOf(request).id);
+      return { backup: Views.backup(r.backup), ok: r.ok, detail: r.detail };
     });
 
     api.post('/backups/:id/restore', { config: { audit: AuditClient.route('atc-backup.backup.restore', target, (r, b) => ({ live: Boolean(/** @type {any} */ (r.body)?.live), target: b?.target, safetyBackupId: b?.safetyBackupId })) }, ...admin, schema: { params: Schemas.idParams, body: Schemas.restore } }, async (request) => {
@@ -162,7 +167,8 @@ export class BackupApi {
         sources: items.length, backups: items.reduce((a, x) => a + x.okCount, 0), bytes: items.reduce((a, x) => a + x.bytes, 0),
         failing: items.filter((x) => x.last?.status === 'failed').map((x) => x.id), stale, running: items.filter((x) => x.running).map((x) => x.id),
         intervalMin: this.config.schedule.intervalMin, retentionCount: this.config.schedule.retentionCount, retentionDays: this.config.schedule.retentionDays,
-        media: this.config.media !== null, liveRestore: this.config.allowLiveRestore,
+        media: this.config.media !== null, liveRestore: this.config.allowLiveRestore, encrypted: this.config.encryptionKey !== null, drillIntervalHours: this.config.drillIntervalHours,
+        drillFailing: items.filter((x) => x.lastDrill?.ok === false).map((x) => x.id),
       };
     });
   }
@@ -182,6 +188,9 @@ export class BackupApi {
         '# HELP backup_last_ok Whether the newest finished backup of a source succeeded (1) or failed (0).',
         '# TYPE backup_last_ok gauge',
         ...items.filter((x) => x.last).map((x) => `backup_last_ok{source="${label(x.id)}"} ${x.last?.status === 'ok' ? 1 : 0}`),
+        '# HELP backup_last_drill_ok Whether the newest restore drill of a source succeeded (1) or failed (0).',
+        '# TYPE backup_last_drill_ok gauge',
+        ...items.filter((x) => x.lastDrill).map((x) => `backup_last_drill_ok{source="${label(x.id)}"} ${x.lastDrill?.ok ? 1 : 0}`),
         '# HELP backup_stored Successful backups kept per source.',
         '# TYPE backup_stored gauge',
         ...items.map((x) => `backup_stored{source="${label(x.id)}"} ${x.okCount}`),
@@ -189,7 +198,7 @@ export class BackupApi {
         '# TYPE backup_stored_bytes gauge',
         ...items.map((x) => `backup_stored_bytes{source="${label(x.id)}"} ${x.bytes}`),
         ...AuditMetrics.lines(this.audit),
-        ...this.service.events.metricLines(),
+        ...this.service.publisher.metricLines(),
         '# HELP backup_process_uptime_seconds Process uptime.',
         '# TYPE backup_process_uptime_seconds gauge',
         `backup_process_uptime_seconds ${process.uptime().toFixed(0)}`,

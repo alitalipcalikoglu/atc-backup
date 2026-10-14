@@ -16,10 +16,10 @@ export class Application {
     this.config = config;
     this.version = readServiceVersion(import.meta.url);
     this.audit = new AuditClient({ target: config.audit });
-    this.events = new EventPublisher({ source: 'atc-backup', target: config.events });
+    this.publisher = new EventPublisher({ source: 'atc-backup', target: config.webhookOut });
     this.db = new Database(config.dbPath, { backupDir: config.dbBackupDir });
     this.store = new BackupStore(this.db);
-    this.service = new BackupService({ config, store: this.store, media: config.media ? new MediaClient(config.media) : null, events: this.events });
+    this.service = new BackupService({ config, store: this.store, media: config.media ? new MediaClient(config.media) : null, publisher: this.publisher });
     /** @type {import('fastify').FastifyInstance|null} */
     this.app = null;
     /** @type {NodeJS.Timeout|null} */
@@ -60,14 +60,14 @@ export class Application {
         () => { if (this.timer) clearInterval(this.timer); this.service.stopping.abort(); },
         () => this.app?.close(),
         () => this.service.idle(),
-        () => this.events.close(),
+        () => this.publisher.close(),
         () => this.audit.close(),
         () => this.db.close(),
       ],
     });
     this.shutdown = shutdown;
     this.audit.logger = app.log;
-    this.events.logger = app.log;
+    this.publisher.logger = app.log;
     this.audit.start();
     await app.listen({ port: config.port, host: config.host });
     app.log.info({ tls: config.tls !== null, sources: config.sources.map((s) => s.id), intervalMin: config.schedule.intervalMin }, config.tls ? 'serving HTTPS' : 'serving plain HTTP, terminate TLS at a reverse proxy');

@@ -180,7 +180,7 @@ test('events: completed and failed backups are published; stale after two silent
   const clock = manualClock();
   /** @type {[string, any][]} */ const out = [];
   const events = { publish: (/** @type {string} */ type, /** @type {any} */ data) => { out.push([type, data]); return true; } };
-  const { service } = testService(w.dir, { BACKUP_INTERVAL_MIN: '60' }, { now: clock.now, events });
+  const { service } = testService(w.dir, { BACKUP_INTERVAL_MIN: '60' }, { now: clock.now, publisher: events });
   await service.tick();
   assert.deepEqual(out.map(([ty, d]) => `${ty}:${d.source}`).sort(), ['backup.completed:app', 'backup.completed:logs', 'ops.backup.failed:gone']);
   assert.equal(out.find(([ty]) => ty === 'ops.backup.failed')?.[1].stage, 'backup');

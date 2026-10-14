@@ -13,7 +13,7 @@ COPY package.json ./
 COPY openapi.yaml ./
 COPY src ./src
 USER node
-# Mount each source data volume under /sources/<id> and list it in BACKUP_SOURCES.
+# Mount each source data volume under /sources/<id> and list it in BACKUP_SOURCES (databases) or BACKUP_TREES (files and directories, packed with the system tar).
 VOLUME ["/data"]
 EXPOSE 3017
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \

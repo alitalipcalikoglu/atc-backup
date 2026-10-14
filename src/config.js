@@ -31,9 +31,11 @@ export class Config {
     this.apiKeys = v.apiKeys;
     this.rateLimitMax = v.rateLimitMax;
     this.media = v.media;
-    this.events = v.events;
+    this.webhookOut = v.webhookOut;
     this.schedule = Object.freeze({ ...v.schedule });
     this.allowLiveRestore = v.allowLiveRestore;
+    this.encryptionKey = v.encryptionKey;
+    this.drillIntervalHours = v.drillIntervalHours;
     Object.freeze(this);
   }
 
@@ -44,12 +46,19 @@ export class Config {
     const keyPath = r.optional('TLS_KEY_PATH');
     if (Boolean(certPath) !== Boolean(keyPath)) throw new ConfigError('TLS_CERT_PATH and TLS_KEY_PATH must be set together');
     const dbPath = r.optional('DB_PATH') || './data/backup.db';
-    const sources = Config.#parseSources(r.optional('BACKUP_SOURCES'));
+    const sources = [...Config.#parseSources(r.optional('BACKUP_SOURCES'), 'sqlite', 'BACKUP_SOURCES')];
+    for (const t of Config.#parseSources(r.optional('BACKUP_TREES'), 'tree', 'BACKUP_TREES')) {
+      if (sources.some((s) => s.id === t.id)) throw new ConfigError(`BACKUP_TREES id "${t.id}" is also a BACKUP_SOURCES id`);
+      if (sources.some((s) => s.path === t.path)) throw new ConfigError(`BACKUP_TREES path "${t.path}" is also a BACKUP_SOURCES path`);
+      sources.push(t);
+    }
     const backupDir = resolve(r.optional('BACKUP_DIR') || './data/backups');
     const restoreDir = resolve(r.optional('RESTORE_DIR') || './data/restores');
     for (const s of sources) {
-      if (dbPath !== ':memory:' && s.path === resolve(dbPath)) throw new ConfigError(`BACKUP_SOURCES "${s.id}" is this service's own database`);
-      if (s.path.startsWith(`${backupDir}/`) || s.path.startsWith(`${restoreDir}/`)) throw new ConfigError(`BACKUP_SOURCES "${s.id}" lies inside BACKUP_DIR or RESTORE_DIR`);
+      const name = s.kind === 'tree' ? 'BACKUP_TREES' : 'BACKUP_SOURCES';
+      if (dbPath !== ':memory:' && s.path === resolve(dbPath)) throw new ConfigError(`${name} "${s.id}" is this service's own database`);
+      if (s.path.startsWith(`${backupDir}/`) || s.path.startsWith(`${restoreDir}/`)) throw new ConfigError(`${name} "${s.id}" lies inside BACKUP_DIR or RESTORE_DIR`);
+      if (s.kind === 'tree' && [backupDir, restoreDir].some((d) => d === s.path || d.startsWith(`${s.path}/`))) throw new ConfigError(`${name} "${s.id}" contains BACKUP_DIR or RESTORE_DIR`);
     }
     return new Config({
       port: r.integer('PORT', 3017, { min: 0, max: 65535 }),
@@ -67,7 +76,7 @@ export class Config {
       apiKeys: Config.#parseApiKeys(r.required('BACKUP_API_KEYS'), sources),
       rateLimitMax: r.integer('RATE_LIMIT_MAX', 600, { min: 1 }),
       media: Config.#parseMedia(r),
-      events: EventPublisher.parseEnv(r, ConfigError),
+      webhookOut: EventPublisher.parseEnv(r, ConfigError),
       schedule: {
         intervalMin: r.integer('BACKUP_INTERVAL_MIN', 360, { min: 0, max: 525_600 }),
         retentionCount: r.integer('RETENTION_COUNT', 14, { min: 1, max: 10_000 }),
@@ -76,28 +85,37 @@ export class Config {
         pagesPerStep: r.integer('PAGES_PER_STEP', 100_000, { min: 1 }),
       },
       allowLiveRestore: r.boolean('ALLOW_LIVE_RESTORE', false),
+      encryptionKey: Config.#parseKey(r.optional('BACKUP_ENCRYPTION_KEY')),
+      drillIntervalHours: r.integer('DRILL_INTERVAL_HOURS', 24, { min: 0, max: 8_760 }),
     });
   }
 
   /**
    * `id=path,id=path`. Paths resolve against the working directory; ids and paths are unique.
-   * @param {string} raw @returns {Source[]}
+   * @param {string} raw @param {'sqlite'|'tree'} kind @param {string} name @returns {Source[]}
    */
-  static #parseSources(raw) {
+  static #parseSources(raw, kind, name) {
     /** @type {Source[]} */
     const out = [];
     for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
       const at = entry.indexOf('=');
       const id = at > 0 ? entry.slice(0, at).trim() : '';
       const path = at > 0 ? entry.slice(at + 1).trim() : '';
-      if (!Config.SOURCE_PATTERN.test(id)) throw new ConfigError(`BACKUP_SOURCES entry "${entry}" needs id=path with a lowercase id`);
-      if (!path || path === ':memory:') throw new ConfigError(`BACKUP_SOURCES "${id}" needs a file path`);
+      if (!Config.SOURCE_PATTERN.test(id)) throw new ConfigError(`${name} entry "${entry}" needs id=path with a lowercase id`);
+      if (!path || path === ':memory:') throw new ConfigError(`${name} "${id}" needs a ${kind === 'tree' ? 'path' : 'file path'}`);
       const abs = resolve(path);
-      if (out.some((s) => s.id === id)) throw new ConfigError(`BACKUP_SOURCES id "${id}" is listed twice`);
-      if (out.some((s) => s.path === abs)) throw new ConfigError(`BACKUP_SOURCES path "${path}" is listed twice`);
-      out.push({ id, path: abs });
+      if (out.some((s) => s.id === id)) throw new ConfigError(`${name} id "${id}" is listed twice`);
+      if (out.some((s) => s.path === abs)) throw new ConfigError(`${name} path "${path}" is listed twice`);
+      out.push({ id, path: abs, kind });
     }
     return out;
+  }
+
+  /** `BACKUP_ENCRYPTION_KEY`: 64 hex characters (32 bytes), empty = backups are stored unencrypted. @param {string} raw @returns {string|null} */
+  static #parseKey(raw) {
+    if (!raw) return null;
+    if (!/^[0-9a-fA-F]{64}$/.test(raw)) throw new ConfigError('BACKUP_ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
+    return raw.toLowerCase();
   }
 
   /** @param {EnvReader} r */

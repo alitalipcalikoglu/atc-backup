@@ -200,6 +200,30 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/backups/{id}/drill:
+    parameters: [{ $ref: "#/components/parameters/BackupParam" }]
+    post:
+      operationId: atc-backup.backups.drill
+      summary: Restore drill (admin)
+      description: Unpacks the backup into a scratch place under RESTORE_DIR as a real restore would (decrypting first when needed), reads it back (row counts of every table, or every archive entry) and removes the scratch copy. The outcome is recorded on the backup (`drill`); a failed drill publishes `ops.backup.failed`. Runs automatically every `DRILL_INTERVAL_HOURS` for the newest backup of each source.
+      tags: [backups]
+      responses:
+        "200":
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backup, ok, detail]
+                properties:
+                  backup: { $ref: "#/components/schemas/Backup" }
+                  ok: { type: boolean }
+                  detail: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/backups/{id}/verify:
     parameters: [{ $ref: "#/components/parameters/BackupParam" }]
     post:
@@ -282,7 +306,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [sources, backups, bytes, failing, stale, running, intervalMin, retentionCount, retentionDays, media, liveRestore]
+                required: [sources, backups, bytes, failing, stale, running, intervalMin, retentionCount, retentionDays, media, liveRestore, encrypted, drillIntervalHours, drillFailing]
                 properties:
                   sources: { type: integer }
                   backups: { type: integer, description: Successful backups kept. }
@@ -295,6 +319,9 @@ paths:
                   retentionDays: { type: integer }
                   media: { type: boolean }
                   liveRestore: { type: boolean }
+                  encrypted: { type: boolean, description: Backups are encrypted at rest (BACKUP_ENCRYPTION_KEY). }
+                  drillIntervalHours: { type: integer }
+                  drillFailing: { type: array, items: { type: string }, description: Sources whose newest restore drill failed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -324,6 +351,8 @@ components:
         source: { type: string }
         status: { type: string, enum: [running, ok, failed] }
         trigger: { type: string, enum: [schedule, manual, pre-restore] }
+        format: { type: string, enum: [sqlite, tar.gz], description: "`tar.gz` for tree sources." }
+        encrypted: { type: boolean, description: "The stored file is AES-256-GCM encrypted (`.enc`); `npm run decrypt` opens it." }
         file: { type: [string, "null"] }
         size: { type: [integer, "null"] }
         sha256: { type: [string, "null"] }
@@ -335,11 +364,14 @@ components:
         durationMs: { type: [integer, "null"] }
         verifiedAt: { type: [string, "null"], format: date-time }
         verified: { type: [boolean, "null"] }
+        drill: { type: [object, "null"], properties: { at: { type: string, format: date-time }, ok: { type: boolean }, detail: { type: object, description: "Table row counts (database) or entry count (tree), or the error." } } }
         media: { type: [object, "null"], properties: { fileId: { type: [string, "null"] }, error: { type: [string, "null"] } } }
     Source:
       type: object
       properties:
         id: { type: string }
+        kind: { type: string, enum: [sqlite, tree], description: "`sqlite`: online database backup. `tree`: a file or directory packed into a tar.gz." }
+        lastDrill: { type: [object, "null"], properties: { at: { type: string, format: date-time }, ok: { type: boolean } } }
         file: { type: string, description: Base name of the live file; the full path is not exposed. }
         exists: { type: boolean }
         size: { type: [integer, "null"] }

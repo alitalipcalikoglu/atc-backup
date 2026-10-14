@@ -7,7 +7,11 @@ export class BackupStore {
     const raw = db.raw;
     this.stmt = {
       insert: raw.prepare('INSERT INTO backups (id, source, status, trigger, created_by, started_at) VALUES (?, ?, \'running\', ?, ?, ?)'),
-      finishOk: raw.prepare('UPDATE backups SET status = \'ok\', file = ?, size = ?, sha256 = ?, pages = ?, finished_at = ?, verified_at = ?, verify_ok = 1 WHERE id = ?'),
+      finishOk: raw.prepare('UPDATE backups SET status = \'ok\', file = ?, size = ?, sha256 = ?, pages = ?, format = ?, encrypted = ?, finished_at = ?, verified_at = ?, verify_ok = 1 WHERE id = ?'),
+      drill: raw.prepare('UPDATE backups SET drill_at = ?, drill_ok = ?, drill_detail = ? WHERE id = ?'),
+      lastDrill: raw.prepare('SELECT MAX(drill_at) AS at FROM backups WHERE source = ?'),
+      lastDrilled: raw.prepare('SELECT drill_at, drill_ok FROM backups WHERE source = ? AND drill_at IS NOT NULL ORDER BY drill_at DESC LIMIT 1'),
+      newestOkOf: raw.prepare('SELECT * FROM backups WHERE source = ? AND status = \'ok\' AND trigger != \'pre-restore\' ORDER BY started_at DESC, id DESC LIMIT 1'),
       finishFailed: raw.prepare('UPDATE backups SET status = \'failed\', error = ?, finished_at = ? WHERE id = ?'),
       get: raw.prepare('SELECT * FROM backups WHERE id = ?'),
       verify: raw.prepare('UPDATE backups SET verified_at = ?, verify_ok = ? WHERE id = ?'),
@@ -31,8 +35,20 @@ export class BackupStore {
   /** @param {string} id @param {string} source @param {import('../types.js').BackupTrigger} trigger @param {string} by @param {number} now */
   insert(id, source, trigger, by, now) { this.stmt.insert.run(id, source, trigger, by, now); }
 
-  /** @param {string} id @param {{ file: string, size: number, sha256: string, pages: number }} f @param {number} now */
-  finishOk(id, f, now) { this.stmt.finishOk.run(f.file, f.size, f.sha256, f.pages, now, now, id); }
+  /** @param {string} id @param {{ file: string, size: number, sha256: string, pages: number|null, format: 'sqlite'|'tar.gz', encrypted: boolean }} f @param {number} now */
+  finishOk(id, f, now) { this.stmt.finishOk.run(f.file, f.size, f.sha256, f.pages, f.format, f.encrypted ? 1 : 0, now, now, id); }
+
+  /** @param {string} id @param {boolean} ok @param {object} detail @param {number} now */
+  setDrill(id, ok, detail, now) { this.stmt.drill.run(now, ok ? 1 : 0, JSON.stringify(detail).slice(0, 2_000), id); }
+
+  /** Outcome of the newest restore drill of a source. @param {string} source @returns {{ at: number, ok: boolean }|null} */
+  lastDrilled(source) { const r = this.stmt.lastDrilled.get(source); return r ? { at: Number(r.drill_at), ok: r.drill_ok === 1 } : null; }
+
+  /** When any backup of the source was last drilled. @param {string} source @returns {number|null} */
+  lastDrillAt(source) { const at = this.stmt.lastDrill.get(source)?.at; return at === null || at === undefined ? null : Number(at); }
+
+  /** The newest successful non-safety backup of a source. @param {string} source @returns {BackupRow|undefined} */
+  newestOk(source) { return /** @type {any} */ (this.stmt.newestOkOf.get(source)); }
 
   /** @param {string} id @param {string} error @param {number} now */
   finishFailed(id, error, now) { this.stmt.finishFailed.run(error.slice(0, 1_000), now, id); }

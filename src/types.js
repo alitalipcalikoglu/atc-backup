@@ -15,7 +15,8 @@
 /**
  * @typedef {object} Source
  * @property {string} id     Stable name, usually the owning service id (`atc-auth`).
- * @property {string} path   Absolute path of the live SQLite file.
+ * @property {string} path   Absolute path of the live SQLite file, or of the file or directory of a tree source.
+ * @property {'sqlite'|'tree'} kind  `sqlite`: online backup of a database. `tree`: a file or directory packed into a `.tar.gz`.
  */
 
 /**
@@ -51,9 +52,11 @@
  * @property {ApiKey[]} apiKeys
  * @property {number} rateLimitMax
  * @property {MediaTarget|null} media
- * @property {{ url: string, apiKey: string, timeoutMs: number }|null} events  atc-webhook-out target for operational events (null = off).
+ * @property {{ url: string, apiKey: string, timeoutMs: number }|null} webhookOut  atc-webhook-out target for operational events (null = off).
  * @property {Schedule} schedule
  * @property {boolean} allowLiveRestore
+ * @property {string|null} encryptionKey  64 hex characters; backups are encrypted at rest when set.
+ * @property {number} drillIntervalHours  Hours between automatic restore drills of the newest backup per source; 0 = off.
  */
 
 /** @typedef {'running'|'ok'|'failed'} BackupStatus */
@@ -69,6 +72,11 @@
  * @property {number|null} size
  * @property {string|null} sha256
  * @property {number|null} pages
+ * @property {'sqlite'|'tar.gz'} format
+ * @property {number} encrypted          1 when the stored file is AES-256-GCM encrypted.
+ * @property {number|null} drill_at
+ * @property {number|null} drill_ok
+ * @property {string|null} drill_detail  JSON: what the last restore drill found.
  * @property {string|null} error
  * @property {string} created_by
  * @property {number} started_at

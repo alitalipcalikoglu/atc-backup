@@ -9,6 +9,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Retention](retention.md) | Count and age limits, safety backups, deleting by hand |
 | [Download and verify](download-and-verify.md) | Downloading with the checksum, re-checking a stored backup |
 | [Restore](restore.md) | Restoring to a file, overwrite, the guarded live restore |
+| [Trees, encryption and restore drills](trees-encryption-drills.md) | Backing up directories and key files, encrypting at rest, proving that a backup restores |
 | [Off-host copies in atc-media](media-copies.md) | Uploading each backup to atc-media, failures |
 | [API keys, roles and scopes](keys-and-roles.md) | read, admin; keys scoped to sources |
 | [Operations](operations.md) | Health, readiness, metrics, stats, PM2, Docker |
