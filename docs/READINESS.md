@@ -7,7 +7,11 @@ a file, guarded live restore and optional off-host copies in atc-media.
 
 ## Dependencies
 Read access to the source files (same host or mounted volumes). `atc-media` (optional, off-host
-copies), `atc-audit` (optional, events). Neither is needed for a backup to succeed.
+copies), `atc-audit` (optional, audit events), `atc-webhook-out` (optional, `ops.backup.failed`,
+`ops.backup.stale` and `backup.completed` events through a publish-role key, best effort from a
+bounded in-memory queue). None is needed for a backup to succeed. A warm standby pulls snapshots
+the other way round: `npm run standby -- <source> <target>` on the standby host reads this
+service's newest verified snapshot (atc-stack README, "High availability").
 
 ## Persistence
 Own records in SQLite at `DB_PATH` (`./data/backup.db`; Docker `/data/backup.db`), WAL, one table
