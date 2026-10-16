@@ -21,7 +21,7 @@ What it does, per run:
 
 1. Asks the primary for the newest successful backup of the source (`GET /v1/backups?source=…&status=ok&limit=1`).
 2. Skips everything when `<target>.standby.json` already names that backup.
-3. Downloads it, compares the SHA-256 with the one the primary recorded, decrypts it when needed, and runs `PRAGMA integrity_check`.
+3. Downloads it (abandoned after 30 minutes, or as soon as it grows past the size the primary recorded), compares the SHA-256 with the one the primary recorded, decrypts it when needed, and runs `PRAGMA integrity_check`.
 4. Removes a stale `-wal`/`-shm`, renames the file into place, and writes `<target>.standby.json` (backup id, checksum, times).
 
 Any failed step leaves the previous copy untouched and exits with status 1. Run it from cron every backup interval (`BACKUP_INTERVAL_MIN` on the primary); the standby is then at most one interval plus the pull behind (the RPO).

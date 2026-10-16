@@ -29,7 +29,7 @@ test('standby: pulls the newest verified snapshot, swaps it in, skips when curre
     db.exec("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('from-primary');");
     db.close();
     const sha256 = createHash('sha256').update(readFileSync(snap)).digest('hex');
-    const backup = { id: 'bk_mv8abcde0123456789abcdef', format: 'sqlite', encrypted: false, sha256, startedAt: '2026-10-16T00:00:00.000Z' };
+    const backup = { id: 'bk_mv8abcde0123456789abcdef', format: 'sqlite', encrypted: false, sha256, size: readFileSync(snap).length, startedAt: '2026-10-16T00:00:00.000Z' };
     const target = join(dir, 'live', 'auth.db');
     mkdirSync(join(dir, 'live'));
     writeFileSync(`${target}-wal`, 'stale');
@@ -49,6 +49,10 @@ test('standby: pulls the newest verified snapshot, swaps it in, skips when curre
     const bad = new StandbyPull({ url: 'http://primary.test', apiKey: 'k'.repeat(40), fetchImpl: primary(snap, { ...backup, id: 'bk_mv8abcde0123456789abcde0', sha256: '0'.repeat(64) }).fetchImpl });
     await assert.rejects(bad.pull('atc-auth', target), /checksum mismatch/);
     assert.equal(JSON.parse(readFileSync(StandbyPull.markerOf(target), 'utf8')).backupId, backup.id, 'a refused snapshot leaves the previous one in place');
+    await assert.rejects(new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), fetchImpl: primary(snap, { ...backup, id: 'bk_mv8abcde0123456789abcde1', size: 1024 }).fetchImpl }).pull('atc-auth', target), /exceeds the recorded size/, 'a body larger than the recorded size is cut off while streaming');
+    assert.equal(existsSync(`${target}.standby-download`), false, 'the partial download is removed');
+    const slow = /** @type {typeof fetch} */ (async (url, init) => (String(url).includes('/download') ? new Promise((_, reject) => /** @type {AbortSignal} */ (init?.signal).addEventListener('abort', () => reject(/** @type {AbortSignal} */ (init?.signal).reason))) : Response.json({ items: [{ ...backup, id: 'bk_mv8abcde0123456789abcde2' }], nextCursor: null })));
+    await assert.rejects(new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), fetchImpl: slow, downloadTimeoutMs: 50 }).pull('atc-auth', target), /timeout|abort/i, 'a stalled download is abandoned');
     await assert.rejects(new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), fetchImpl: primary(snap, null).fetchImpl }).pull('atc-auth', target), /no successful backup/);
     await assert.rejects(new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), fetchImpl: primary(snap, { ...backup, format: 'tar.gz' }).fetchImpl }).pull('atc-media', target), /file-tree backup/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -63,7 +67,7 @@ test('standby: decrypts an encrypted snapshot with BACKUP_ENCRYPTION_KEY and che
     db.close();
     const enc = join(dir, 'snap.db.enc');
     await Cipher.fromHex(KEY).encrypt(plain, enc);
-    const backup = { id: 'bk_mv8abcde0123456789abcdef', format: 'sqlite', encrypted: true, sha256: createHash('sha256').update(readFileSync(enc)).digest('hex') };
+    const backup = { id: 'bk_mv8abcde0123456789abcdef', format: 'sqlite', encrypted: true, size: readFileSync(enc).length, sha256: createHash('sha256').update(readFileSync(enc)).digest('hex') };
     const target = join(dir, 'auth.db');
     await assert.rejects(new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), fetchImpl: primary(enc, backup).fetchImpl }).pull('atc-auth', target), /set BACKUP_ENCRYPTION_KEY/);
     await new StandbyPull({ url: 'http://p', apiKey: 'k'.repeat(40), encryptionKey: KEY, fetchImpl: primary(enc, backup).fetchImpl }).pull('atc-auth', target);

@@ -14,14 +14,18 @@ import { Cipher } from './crypto/cipher.js';
  */
 export class StandbyPull {
   /**
-   * @param {{ url: string, apiKey: string, encryptionKey?: string, fetchImpl?: typeof fetch }} o
+   * @param {{ url: string, apiKey: string, encryptionKey?: string, fetchImpl?: typeof fetch, downloadTimeoutMs?: number }} o
    */
-  constructor({ url, apiKey, encryptionKey = '', fetchImpl = fetch }) {
+  constructor({ url, apiKey, encryptionKey = '', fetchImpl = fetch, downloadTimeoutMs = StandbyPull.DOWNLOAD_TIMEOUT_MS }) {
     this.url = url.replace(/\/+$/, '');
     this.apiKey = apiKey;
     this.cipher = encryptionKey ? Cipher.fromHex(encryptionKey) : null;
     this.fetch = fetchImpl;
+    this.downloadTimeoutMs = downloadTimeoutMs;
   }
+
+  /** A download that takes longer than this is abandoned; the previous copy stays. */
+  static DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 
   /** @param {string} target */
   static markerOf(target) { return `${target}.standby.json`; }
@@ -45,12 +49,17 @@ export class StandbyPull {
     const download = `${target}.standby-download`;
     const plain = `${target}.standby-tmp`;
     try {
-      const res = await this.fetch(`${this.url}/v1/backups/${encodeURIComponent(latest.id)}/download`, { headers });
+      const res = await this.fetch(`${this.url}/v1/backups/${encodeURIComponent(latest.id)}/download`, { headers, signal: AbortSignal.timeout(this.downloadTimeoutMs) });
       if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`);
+      const expected = Number(latest.size);
+      if (!Number.isFinite(expected) || expected <= 0) throw new Error('the primary recorded no size for this backup');
       const hash = createHash('sha256');
       const body = Readable.fromWeb(/** @type {any} */ (res.body));
-      body.on('data', (/** @type {Buffer} */ chunk) => hash.update(chunk));
+      let received = 0;
+      // The size is checked while streaming, so a wrong or hostile primary cannot fill the disk before the checksum runs.
+      body.on('data', (/** @type {Buffer} */ chunk) => { received += chunk.length; hash.update(chunk); if (received > expected) body.destroy(new Error(`download exceeds the recorded size of ${expected} bytes`)); });
       await pipeline(body, createWriteStream(download, { mode: 0o600 }));
+      if (received !== expected) throw new Error(`download is ${received} bytes, the primary recorded ${expected}`);
       const sha256 = hash.digest('hex');
       if (sha256 !== latest.sha256) throw new Error(`checksum mismatch: got ${sha256}, the primary recorded ${latest.sha256}`);
       if (this.cipher) await this.cipher.decrypt(download, plain);
