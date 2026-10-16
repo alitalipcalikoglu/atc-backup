@@ -35,7 +35,9 @@ None inside a run. A failed scheduled backup is retried at the next interval; a 
 is recorded on the backup (`media.error`) and not retried.
 
 ## Idempotency
-A source runs one backup at a time (`409 BUSY`). Restores to a file never replace an existing file
+A source runs one backup at a time (`409 BUSY`). Backup, verify, drill and restore honour
+`Idempotency-Key` (core `Idempotency`, 24 h, per API key and caller): a repeat replays the first 2xx
+answer instead of running again. Restores to a file never replace an existing file
 without `overwrite`. Deletes of missing backups answer 404.
 
 ## Backup / restore

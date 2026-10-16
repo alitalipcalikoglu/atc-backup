@@ -108,7 +108,7 @@ paths:
           description: Sources visible to the key, in BACKUP_SOURCES order.
           content:
             application/json:
-              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Source" } } } }
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Source" } }, nextCursor: { type: "null", description: Always null; the list is complete. } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -128,6 +128,8 @@ paths:
     parameters: [{ $ref: "#/components/parameters/SourceParam" }]
     post:
       operationId: atc-backup.sources.backup
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Back up a source now (admin)
       description: Waits for the backup to finish. A failed attempt is recorded too and returned with `status` `failed` and its `error`; check `status`. Retention and the media upload run right after a successful backup.
       tags: [sources]
@@ -204,6 +206,8 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BackupParam" }]
     post:
       operationId: atc-backup.backups.drill
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Restore drill (admin)
       description: Unpacks the backup into a scratch place under RESTORE_DIR as a real restore would (decrypting first when needed), reads it back (row counts of every table, or every archive entry) and removes the scratch copy. The outcome is recorded on the backup (`drill`); a failed drill publishes `ops.backup.failed`. Runs automatically every `DRILL_INTERVAL_HOURS` for the newest backup of each source.
       tags: [backups]
@@ -228,6 +232,8 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BackupParam" }]
     post:
       operationId: atc-backup.backups.verify
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Re-check a stored backup (admin)
       description: Recomputes the SHA-256 and runs `PRAGMA integrity_check` on the stored file. The result is recorded on the backup (`verified`, `verifiedAt`).
       tags: [backups]
@@ -252,6 +258,8 @@ paths:
     parameters: [{ $ref: "#/components/parameters/BackupParam" }]
     post:
       operationId: atc-backup.backups.restore
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Write a backup out (admin)
       description: >
         The checksum is checked first; a mismatch restores nothing. With `target`, the file is
@@ -332,6 +340,12 @@ components:
       scheme: bearer
       description: "`BACKUP_API_KEYS=id:secret:role[:source+source]`; role `read` or `admin`."
   parameters:
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: "Optional. Repeats of this POST with the same key (per API key, 24 h) replay the first 2xx answer with `Idempotent-Replayed: true` instead of running again; the same key with another method, path or body is `409 IDEMPOTENCY_MISMATCH`, while the first still runs `409 IDEMPOTENCY_IN_PROGRESS`."
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,255}$' }
     SourceParam: { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z][a-z0-9-]{0,63}$" } }
     BackupParam: { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/BackupId" } }
   responses:

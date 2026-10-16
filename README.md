@@ -44,6 +44,11 @@ Tests and type check: `npm test`, `npm run typecheck`.
 
 Errors: `{ "error": { "code", "message" } }` — `VALIDATION_FAILED`, `INVALID_ARGUMENT` (400), `FORBIDDEN`, `LIVE_RESTORE_DISABLED` (403), `SOURCE_NOT_FOUND`, `BACKUP_NOT_FOUND` (404), `BUSY`, `INVALID_STATE`, `TARGET_EXISTS`, `CHECKSUM_MISMATCH` (409), `RATE_LIMITED` (429). Full contract: [openapi.yaml](openapi.yaml).
 
+## Conventions
+
+- Lists answer `{ items, nextCursor }`; pass `nextCursor` back as `cursor`. Sources are a complete list (`nextCursor: null`); backups page newest first. Backups have `bk_<time><random>` ids (the platform's one id format); source ids are natural keys.
+- Backup, verify, drill and restore honour `Idempotency-Key`: a repeat with the same key (per API key and caller — the console's `X-Actor` counts — for 24 h) replays the first 2xx answer with `Idempotent-Replayed: true`; another body is `409 IDEMPOTENCY_MISMATCH`.
+
 ## Examples
 
 Sources, backups, retention, download and verify, restore, media copies, scoped keys: [examples/README.md](examples/README.md).

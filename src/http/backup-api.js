@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { createErrorHandler, registerInfo, registerOpenApi, registerProbes, registerRequestContext, requestOptions } from '@atc-web/atc-service-core/fastify';
+import { Idempotency } from '@atc-web/atc-service-core/idempotency';
 import { BackupError } from '../domain/errors.js';
 import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
@@ -61,6 +62,8 @@ export class BackupApi {
       reply.header('x-content-type-options', 'nosniff');
       if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
     });
+    // Opt-in per route (config.idempotent): repeats with the same Idempotency-Key replay the first 2xx answer.
+    Idempotency.register(app, { raw: this.db.raw });
     registerProbes(app, async () => {
       this.db.ping();
       mkdirSync(config.backupDir, { recursive: true });
@@ -99,7 +102,7 @@ export class BackupApi {
     };
     const target = (/** @type {FastifyRequest} */ r) => ({ type: 'backup', id: /** @type {any} */ (r.params).id });
 
-    api.get('/sources', read, async (request) => ({ items: (await s.sources()).filter((x) => visible(request, x.id)).map(Views.source) }));
+    api.get('/sources', read, async (request) => ({ items: (await s.sources()).filter((x) => visible(request, x.id)).map(Views.source), nextCursor: null }));
 
     api.get('/sources/:id', { ...read, schema: { params: Schemas.sourceParams } }, async (request) => {
       const id = sourceOf(request);
@@ -107,7 +110,7 @@ export class BackupApi {
       return { source: Views.source(/** @type {any} */ ((await s.sources()).find((x) => x.id === id))) };
     });
 
-    api.post('/sources/:id/backups', { config: { audit: AuditClient.route('atc-backup.backup.create', (_r, b) => ({ type: 'backup', id: b?.backup?.id ?? '' }), (r, b) => ({ source: /** @type {any} */ (r.params).id, status: b?.backup?.status })) }, ...admin, schema: { params: Schemas.sourceParams } }, async (request, reply) => {
+    api.post('/sources/:id/backups', { config: { idempotent: true, audit: AuditClient.route('atc-backup.backup.create', (_r, b) => ({ type: 'backup', id: b?.backup?.id ?? '' }), (r, b) => ({ source: /** @type {any} */ (r.params).id, status: b?.backup?.status })) }, ...admin, schema: { params: Schemas.sourceParams } }, async (request, reply) => {
       const row = await s.run(sourceOf(request), { trigger: 'manual', by: request.apiKey.id });
       return reply.code(201).send({ backup: Views.backup(row) });
     });
@@ -134,17 +137,17 @@ export class BackupApi {
       return reply.send(createReadStream(f.path));
     });
 
-    api.post('/backups/:id/verify', { config: { audit: AuditClient.route('atc-backup.backup.verify', target, (_r, b) => ({ checksumOk: b?.checksumOk, integrity: b?.integrity })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
+    api.post('/backups/:id/verify', { config: { idempotent: true, audit: AuditClient.route('atc-backup.backup.verify', target, (_r, b) => ({ checksumOk: b?.checksumOk, integrity: b?.integrity })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
       const r = await s.verify(backupOf(request).id);
       return { backup: Views.backup(r.backup), checksumOk: r.checksumOk, integrity: r.integrity };
     });
 
-    api.post('/backups/:id/drill', { config: { audit: AuditClient.route('atc-backup.backup.drill', target, (_r, b) => ({ ok: b?.ok })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
+    api.post('/backups/:id/drill', { config: { idempotent: true, audit: AuditClient.route('atc-backup.backup.drill', target, (_r, b) => ({ ok: b?.ok })) }, ...admin, schema: { params: Schemas.idParams } }, async (request) => {
       const r = await s.drill(backupOf(request).id);
       return { backup: Views.backup(r.backup), ok: r.ok, detail: r.detail };
     });
 
-    api.post('/backups/:id/restore', { config: { audit: AuditClient.route('atc-backup.backup.restore', target, (r, b) => ({ live: Boolean(/** @type {any} */ (r.body)?.live), target: b?.target, safetyBackupId: b?.safetyBackupId })) }, ...admin, schema: { params: Schemas.idParams, body: Schemas.restore } }, async (request) => {
+    api.post('/backups/:id/restore', { config: { idempotent: true, audit: AuditClient.route('atc-backup.backup.restore', target, (r, b) => ({ live: Boolean(/** @type {any} */ (r.body)?.live), target: b?.target, safetyBackupId: b?.safetyBackupId })) }, ...admin, schema: { params: Schemas.idParams, body: Schemas.restore } }, async (request) => {
       const b = /** @type {{ target?: string, overwrite?: boolean, live?: boolean, confirm?: string }} */ (request.body ?? {});
       const r = await s.restore(backupOf(request).id, { ...b, by: request.apiKey.id });
       return { backup: Views.backup(r.backup), live: r.live, target: r.target, size: r.size, sha256: r.sha256, safetyBackupId: r.safetyBackupId };
