@@ -48,8 +48,11 @@ export class StandbyPull {
 
     const download = `${target}.standby-download`;
     const plain = `${target}.standby-tmp`;
+    // A referenced timer, not AbortSignal.timeout: the latter is unref'd and would not fire in an otherwise idle process.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new Error(`download timed out after ${this.downloadTimeoutMs} ms`)), this.downloadTimeoutMs);
     try {
-      const res = await this.fetch(`${this.url}/v1/backups/${encodeURIComponent(latest.id)}/download`, { headers, signal: AbortSignal.timeout(this.downloadTimeoutMs) });
+      const res = await this.fetch(`${this.url}/v1/backups/${encodeURIComponent(latest.id)}/download`, { headers, signal: abort.signal });
       if (!res.ok || !res.body) throw new Error(`download failed: HTTP ${res.status}`);
       const expected = Number(latest.size);
       if (!Number.isFinite(expected) || expected <= 0) throw new Error('the primary recorded no size for this backup');
@@ -75,6 +78,7 @@ export class StandbyPull {
       await writeFile(marker, `${JSON.stringify({ backupId: latest.id, sha256: latest.sha256, startedAt: latest.startedAt, pulledAt: new Date().toISOString() })}\n`, { mode: 0o600 });
       return { status: 'updated', backupId: latest.id, sha256: latest.sha256 };
     } finally {
+      clearTimeout(timer);
       await Promise.all([rm(download, { force: true }), rm(plain, { force: true })]);
     }
   }
