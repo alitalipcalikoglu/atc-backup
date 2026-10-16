@@ -18,6 +18,7 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch --env-file=.env src/index.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\"",
     "decrypt": "node --disable-warning=ExperimentalWarning src/decrypt-cli.js",
+    "standby": "node --disable-warning=ExperimentalWarning src/standby-cli.js",
     "typecheck": "tsc -p jsconfig.json"
   },
   "dependencies": {

@@ -24,6 +24,7 @@ Tests and type check: `npm test`, `npm run typecheck`.
 - **Retention**: after each successful backup, keep the newest `RETENTION_COUNT`, drop those older than `RETENTION_DAYS`; the newest is always kept.
 - **Restore**: to `RESTORE_DIR/<target>` (a file, or a directory for a tree), or (databases only, with `ALLOW_LIVE_RESTORE=true` and `confirm`) over the live file after a safety backup.
 - **Encryption**: with `BACKUP_ENCRYPTION_KEY` (64 hex characters) every new backup is stored AES-256-GCM encrypted (`*.enc`); verify, drill and restore decrypt on the fly; `npm run decrypt` opens a file outside the service.
+- **Warm standby**: `npm run standby -- <source> <target-file>` on a second host pulls the newest successful snapshot from the primary (`PRIMARY_BACKUP_URL`, `PRIMARY_BACKUP_API_KEY`), checks its checksum and integrity and swaps it in; see [examples/standby.md](examples/standby.md).
 - **Restore drill**: every `DRILL_INTERVAL_HOURS` (24) the newest backup of each source is restored into a scratch place and read back (row counts of every table, or every archive entry); a failure publishes `ops.backup.failed`.
 
 ## API

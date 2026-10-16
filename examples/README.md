@@ -11,6 +11,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Restore](restore.md) | Restoring to a file, overwrite, the guarded live restore |
 | [Trees, encryption and restore drills](trees-encryption-drills.md) | Backing up directories and key files, encrypting at rest, proving that a backup restores |
 | [Off-host copies in atc-media](media-copies.md) | Uploading each backup to atc-media, failures |
+| [Warm standby](standby.md) | Pulling verified snapshots to a second host, promoting it |
 | [API keys, roles and scopes](keys-and-roles.md) | read, admin; keys scoped to sources |
 | [Operations](operations.md) | Health, readiness, metrics, stats, PM2, Docker |
 | [Events](events.md) | `backup.completed`, `ops.backup.failed`, `ops.backup.stale` through atc-webhook-out |
